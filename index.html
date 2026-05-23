@@ -54,6 +54,59 @@
         .clear {
             background-color: #c62828 !important;
         }
+        .setup-container {
+            width: 100%;
+            max-width: 400px;
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 12px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            background-color: #333;
+            color: white;
+        }
+        #btn-add-class {
+            padding: 12px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            background-color: #ff9800;
+            color: black;
+            cursor: pointer;
+        }
+        .button-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 15px;
+            width: 100%;
+            max-width: 400px;
+        }
+        .train-btn {
+            width: 100%;
+            padding: 15px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            color: white;
+            transition: opacity 0.2s;
+            -webkit-user-select: none;
+            user-select: none;
+            text-align: left;
+            display: flex;
+            justify-content: space-between;
+        }
+        .train-btn:active {
+            opacity: 0.7;
+        }
     </style>
 </head>
 <body>
@@ -62,17 +115,32 @@
     <div id="video-container">
         <video id="webcam" autoplay playsinline muted></video>
     </div>
+
+    <div class="setup-container">
+        <input type="text" id="class-name-input" placeholder="Type new item name...">
+        <button id="btn-add-class">Add Thing</button>
+    </div>
+
+    <div id="training-buttons" class="button-container"></div>
+
     <div id="status">Loading AI Model...</div>
 
     <script>
         const videoElement = document.getElementById('webcam');
         const statusElement = document.getElementById('status');
+        const trainingButtonsContainer = document.getElementById('training-buttons');
+        const classNameInput = document.getElementById('class-name-input');
+        const btnAddClass = document.getElementById('btn-add-class');
         
         let net;
         const classifier = knnClassifier.create();
         let lastSentState = "";
+        let counts = {};
 
-        // Change this if your Home Assistant IP changes
+        // Colors to cycle through for custom buttons
+        const buttonColors = ["#1976d2", "#616161", "#e91e63", "#9c27b0", "#009688"];
+        let colorIndex = 0;
+
         const HA_URL = "http://192.168.1.206:8123/api/services/input_select/select_option";
 
         async function setupWebcam() {
@@ -93,67 +161,25 @@
             });
         }
 
-        async function sendToHomeAssistant(label) {
-            // Only send a network request if the state actually changes
-            if (label === lastSentState) return;
-
-            try {
-                const response = await fetch(HA_URL, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        entity_id: "input_select.wall_tape_switch",
-                        option: label
-                    })
-                });
-                
-                if (response.ok) {
-                    console.log(`Successfully updated HA to: ${label}`);
-                    lastSentState = label;
-                } else {
-                    console.error("HA responded with an error status code.");
-                }
-            } catch (error) {
-                console.error("Network error trying to connect to Home Assistant:", error);
-            }
-        }
-
-        async function app() {
-            statusElement.innerText = "Loading MobileNet...";
-            net = await tf.loadLayersModel('https://storage.googleapis.com/tfjs-models/tfjs/mobilenet_v1_0.25_224/model.json');
-            statusElement.innerText = "Camera starting...";
+        // Adds a camera frame sample into the AI memory
+        function addExample(label) {
+            if (!net) return;
+            const img = tf.browser.fromPixels(videoElement);
+            const activation = net.predict(img.expandDims(0));
+            classifier.addExample(activation, label);
             
-            await setupWebcam();
-            statusElement.innerText = "AI Active - Scanning Room";
-
-            // Temporary continuous loop to evaluate camera frames
-            setInterval(async () => {
-                if (classifier.getNumClasses() > 0) {
-                    const img = tf.browser.fromPixels(videoElement);
-                    const activation = net.predict(img.expandDims(0));
-                    const result = await classifier.predictClass(activation);
-                    
-                    const label = result.label;
-                    
-                    if (label === "me") {
-                        statusElement.innerText = "Detected: Me";
-                        statusElement.className = "detected";
-                        sendToHomeAssistant("me");
-                    } else {
-                        statusElement.innerText = "Clear: Background";
-                        statusElement.className = "clear";
-                        sendToHomeAssistant("background");
-                    }
-                    
-                    img.dispose();
-                }
-            }, 500);
+            // Increment and display the training count
+            counts[label]++;
+            document.getElementById(`count-${label}`).innerText = counts[label];
+            
+            img.dispose();
         }
 
-        // Initialize the tracking application
-        app();
-    </script>
-</body>
-</html>
+        // Dynamically build a new button on screen for a classification item
+        function createTrainingButton(label) {
+            if (counts[label] !== undefined) return; // Prevent duplicates
+            
+            counts[label] = 0;
+
+            const btn = document.createElement('button');
+            btn.className = 'train-btn';
