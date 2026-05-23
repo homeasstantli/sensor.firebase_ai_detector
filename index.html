@@ -37,6 +37,7 @@
             width: 100%;
             display: block;
             transform: scaleX(-1);
+            object-fit: cover;
         }
         #status {
             margin: 15px 0;
@@ -167,12 +168,13 @@
         }
 
         async function setupWebcam() {
-            logDebug("Requesting camera access...");
+            logDebug("Requesting HD camera access...");
+            // Requesting standard clean HD layout ratios 
             const constraints = { 
                 video: { 
                     facingMode: 'user',
-                    width: { ideal: 224 },
-                    height: { ideal: 224 }
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
                 } 
             };
             
@@ -182,118 +184,9 @@
                 return new Promise((resolve) => {
                     videoElement.onloadedmetadata = () => {
                         videoElement.play();
-                        logDebug("Camera playing successfully.");
+                        logDebug("HD Camera streaming perfectly.");
                         resolve();
                     };
                 });
             } catch (err) {
-                logDebug("Camera Error: " + err.message);
-                statusElement.innerText = "Camera Error! Check settings.";
-                throw err;
-            }
-        }
-
-        function addExample(label) {
-            if (!net) {
-                logDebug("Error: Model not loaded yet.");
-                return;
-            }
-            try {
-                const img = tf.browser.fromPixels(videoElement);
-                const activation = net.predict(img.expandDims(0));
-                classifier.addExample(activation, label);
-                
-                counts[label] = (counts[label] || 0) + 1;
-                const counterSpan = document.getElementById(`count-${label}`);
-                if (counterSpan) counterSpan.innerText = counts[label];
-                
-                img.dispose();
-                logDebug(`Trained "${label}" (${counts[label]})`);
-            } catch (err) {
-                logDebug("Training crash: " + err.message);
-            }
-        }
-
-        // Attach touch/click listeners to core buttons cleanly
-        document.getElementById('btn-me').addEventListener('click', () => addExample('me'));
-        document.getElementById('btn-background').addEventListener('click', () => addExample('background'));
-
-        function createCustomTrainingButton(label) {
-            if (counts[label] !== undefined) return; 
-            counts[label] = 0;
-
-            const btn = document.createElement('button');
-            btn.className = 'train-btn';
-            btn.style.backgroundColor = buttonColors[colorIndex % buttonColors.length];
-            colorIndex++;
-
-            btn.innerHTML = `<span>Train "${label}"</span> <span id="count-${label}">0</span>`;
-            btn.addEventListener('click', () => addExample(label));
-            
-            trainingButtonsContainer.appendChild(btn);
-            logDebug(`Added custom button: ${label}`);
-        }
-
-        btnAddClass.addEventListener('click', () => {
-            const name = classNameInput.value.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
-            if (name) {
-                createCustomTrainingButton(name);
-                classNameInput.value = "";
-            }
-        });
-
-        async function sendToHomeAssistant(label) {
-            if (label === lastSentState) return;
-            try {
-                const response = await fetch(HA_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        entity_id: "input_select.wall_tape_switch",
-                        option: label
-                    })
-                });
-                if (response.ok) {
-                    lastSentState = label;
-                    logDebug(`HA Updated: ${label}`);
-                }
-            } catch (error) {
-                console.error("HA Sync error:", error);
-            }
-        }
-
-        async function app() {
-            try {
-                logDebug("Downloading TensorFlow model...");
-                statusElement.innerText = "Loading AI Engine...";
-                net = await tf.loadLayersModel('https://storage.googleapis.com/tfjs-models/tfjs/mobilenet_v1_0.25_224/model.json');
-                
-                logDebug("Model loaded. Connecting webcam...");
-                await setupWebcam();
-                
-                statusElement.innerText = "AI Ready! Tap buttons.";
-                logDebug("System running cleanly.");
-
-                setInterval(async () => {
-                    if (classifier.getNumClasses() > 0) {
-                        const img = tf.browser.fromPixels(videoElement);
-                        const activation = net.predict(img.expandDims(0));
-                        const result = await classifier.predictClass(activation);
-                        
-                        const label = result.label;
-                        statusElement.innerText = `Detected: ${label.toUpperCase()}`;
-                        statusElement.className = (label === "me") ? "detected" : "clear";
-
-                        sendToHomeAssistant(label);
-                        img.dispose();
-                    }
-                }, 400);
-            } catch (err) {
-                logDebug("App init failed: " + err.message);
-            }
-        }
-
-        app();
-    </script>
-</body>
-</html>
+                logDebug("Camera Error:
