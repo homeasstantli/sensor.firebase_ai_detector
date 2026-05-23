@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trainable Firebase AI App</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier@1.2.4"></script>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // 🔌 Your exact web app's Firebase configuration integrated:
+        const firebaseConfig = {
+            apiKey: "AIzaSyCHwQZrRUYrgpAv1_JscdHvHBXCMH-1r8c",
+            authDomain: "ha-object-detector.firebaseapp.com",
+            projectId: "ha-object-detector",
+            storageBucket: "ha-object-detector.firebasestorage.app",
+            messagingSenderId: "1091277100158",
+            appId: "1:1091277100158:web:4c5df0cf63caaf3c40b42f",
+            measurementId: "G-TTFESRVCP3"
+        };
+
+        // Initialize Firebase & Firestore database instance
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Expose database utilities to global window space for the tracking loop script
+        window.db = db;
+        window.dbDoc = doc;
+        window.dbSetDoc = setDoc;
+    </script>
+
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #222; color: #fff; margin: 0; padding: 20px; }
+        #video-container { display: flex; justify-content: center; margin-top: 15px; }
+        video { border: 4px solid #00ffcc; border-radius: 8px; transform: scaleX(-1); background: #111; width: 400px; height: 300px; }
+        #status { font-size: 1.3em; margin: 15px; color: #00ffcc; }
+        .control-panel { background: #333; padding: 15px; border-radius: 8px; max-width: 500px; margin: 15px auto; }
+        input, button { padding: 10px; font-size: 1em; margin: 5px; border-radius: 5px; border: none; }
+        button { background: #00ffcc; font-weight: bold; cursor: pointer; }
+        button:hover { background: #00e6b8; }
+        .train-btn { background: #ff3366; color: white; }
+    </style>
+</head>
+<body>
+
+    <h1>Trainable Web AI (Firebase Powered)</h1>
+    <button onclick="initApp()">🔌 1. Start App & Camera</button>
+    
+    <div id="status">Status: Click start button...</div>
+
+    <div class="control-panel">
+        <h3>2. Train Custom Object</h3>
+        <input type="text" id="object-name" placeholder="e.g., wallet, phone, keys">
+        <button class="train-btn" onclick="trainCurrentFrame()">📸 Train Object Image</button>
+    </div>
+
+    <div id="video-container">
+        <video id="webcam" autoplay playsinline muted></video>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const statusDiv = document.getElementById('status');
+        let model, classifier;
+        let lastSentObject = "";
+        let lastSentTime = 0;
+
+        async function initApp() {
+            statusDiv.innerText = "Loading AI Core Engine (Please wait)...";
+            classifier = knnClassifier.create();
+            model = await mobilenet.load();
+            
+            statusDiv.innerText = "AI Loaded. Requesting camera access...";
+            navigator.mediaDevices.getUserMedia({ video: { width: 400, height: 300 } })
+                .then(stream => {
+                    video.srcObject = stream;
+                    video.play();
+                    statusDiv.innerText = "System Ready! Train an object to start tracking.";
+                    startPredictionLoop();
+                })
+                .catch(err => { statusDiv.innerText = "❌ Camera Access Denied."; });
+        }
+
+        async function trainCurrentFrame() {
+            const label = document.getElementById('object-name').value.trim().toLowerCase();
+            if (!label) { alert("Please type a name first!"); return; }
+
+            statusDiv.innerText = `Training "${label}"... Keep object stable.`;
+            const img = tf.browser.fromPixels(video);
+            const logits = model.infer(img, true);
+            classifier.addExample(logits, label);
+            img.dispose();
+            
+            statusDiv.innerText = `Added training sample for: ${label}`;
+            saveToFirebase(label, "just_trained");
+        }
+
+        async function startPredictionLoop() {
+            while (true) {
+                if (classifier.getNumClasses() > 0) {
+                    const img = tf.browser.fromPixels(video);
+                    const logits = model.infer(img, true);
+                    
+                    try {
+                        const result = await classifier.predictClass(logits);
+                        const detectedObject = result.label;
+                        const confidence = result.confidences[detectedObject];
+
+                        if (confidence > 0.80) {
+                            statusDiv.innerText = `Seeing: ${detectedObject} (${Math.round(confidence * 100)}%)`;
+                            saveToFirebase(detectedObject, "active");
+                        }
+                    } catch (e) { console.error(e); }
+                    img.dispose();
+                }
+                await tf.nextFrame();
+                await new Promise(r => setTimeout(r, 400)); // Throttles processing loop to be gentle on CPU
+            }
+        }
+
+        // Send tracking updates straight up to your live cloud collection
+        async function saveToFirebase(objectName, objectStatus) {
+            let currentTime = Date.now();
+            
+            if (objectName !== lastSentObject || (currentTime - lastSentTime > 4000)) {
+                lastSentObject = objectName;
+                lastSentTime = currentTime;
+
+                if (window.db) {
+                    try {
+                        // Writes a clean key-value doc directly to your project database
+                        await window.dbSetDoc(window.dbDoc(window.db, "smart_home", "detector"), {
+                            last_detected_object: objectName,
+                            status: objectStatus,
+                            timestamp: currentTime
+                        });
+                        console.log("Firebase Database Updated:", objectName);
+                    } catch (error) {
+                        console.error("Firebase Database write error:", error);
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
