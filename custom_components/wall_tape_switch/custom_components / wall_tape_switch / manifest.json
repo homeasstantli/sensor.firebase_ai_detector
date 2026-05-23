@@ -1,8 +1,0 @@
-{
-  "domain": "wall_tape_switch",
-  "name": "Wall Tape AI Switch",
-  "codeowners": ["@homeassistantli"],
-  "documentation": "https://github.com/homeassistantli/sensor.firebase_ai_detector",
-  "iot_class": "local_push",
-  "version": "1.0.0"
-}
