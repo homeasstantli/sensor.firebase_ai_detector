@@ -11,8 +11,8 @@
 
     <style>
         body { font-family: sans-serif; text-align: center; background: #222; color: #fff; margin: 0; padding: 20px; }
-        #video-container { display: flex; justify-content: center; margin-top: 15px; }
-        video { border: 4px solid #00ffcc; border-radius: 8px; transform: scaleX(-1); background: #111; width: 400px; height: 300px; }
+        #video-container { display: flex; justify-content: center; margin-top: 15px; position: relative; }
+        video { border: 4px solid #00ffcc; border-radius: 8px; transform: scaleX(-1); background: #111; width: 400px; height: 300px; cursor: pointer; }
         #status { font-size: 1.3em; margin: 15px; color: #00ffcc; min-height: 40px; }
         .control-panel { background: #333; padding: 15px; border-radius: 8px; max-width: 500px; margin: 15px auto; }
         input, button { padding: 10px; font-size: 1em; margin: 5px; border-radius: 5px; border: none; }
@@ -65,40 +65,38 @@
         let lastSentTime = 0;
         let isSystemReady = false;
 
-        // Set up event listeners for training buttons
         document.getElementById('train-btn').addEventListener('click', trainCurrentFrame);
         document.getElementById('bg-btn').addEventListener('click', captureBackgroundWithCountdown);
+        
+        // If the video box is clicked, try to run camera init manually
+        video.addEventListener('click', initApp);
 
-        // 🚀 AUTO RUN: Kicks off immediately when the page finishes rendering
+        // Auto run on window load
         window.addEventListener('DOMContentLoaded', initApp);
 
         async function initApp() {
             statusDiv.innerText = "Loading AI Core Engine (Please wait)...";
             try {
-                classifier = knnClassifier.create();
-                model = await mobilenet.load();
+                if (!classifier) classifier = knnClassifier.create();
+                if (!model) model = await mobilenet.load();
                 
-                statusDiv.innerText = "AI Loaded. Initializing camera stream...";
+                statusDiv.innerText = "AI Loaded. Connecting camera...";
                 
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 400, height: 300 } });
                 video.srcObject = stream;
-                
-                // Explicitly call play to handle browser autoplay policies safely
                 await video.play();
                 
                 statusDiv.innerText = "👉 Click 'Set Empty Background' to calibrate!";
                 isSystemReady = true;
             } catch (err) {
-                statusDiv.innerText = "❌ Auto-start blocked. Click anywhere on the screen or check site camera permissions.";
+                // Friendly error message telling the user exactly how to unblock it
+                statusDiv.innerText = "🔒 Camera blocked. Click inside the black video box to activate!";
                 console.error(err);
-                
-                // Fallback: If browser completely blocks it, listen for any click on the body to force start
-                document.body.addEventListener('click', initApp, { once: true });
             }
         }
 
         function captureBackgroundWithCountdown() {
-            if (!isSystemReady) { alert("Please wait for camera initialization!"); return; }
+            if (!isSystemReady) { alert("Please start the camera first!"); return; }
             
             classifier.clearAllClasses();
             let countdown = 3;
@@ -130,7 +128,7 @@
         async function trainCurrentFrame() {
             const label = document.getElementById('object-name').value.trim().toLowerCase();
             if (!label) { alert("Please type a name first!"); return; }
-            if (label === 'background') { alert("Use the dedicated orange button for background!"); return; }
+            if (label === 'background') { alert("Use the orange button for background!"); return; }
 
             statusDiv.innerText = `Training "${label}"... Keep object stable.`;
             const img = tf.browser.fromPixels(video);
