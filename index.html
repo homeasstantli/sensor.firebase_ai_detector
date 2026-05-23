@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Wall Tape AI Switch</title>
     
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.22.0/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier@1.2.4/dist/knn-classifier.min.js"></script>
     
     <style>
@@ -33,14 +33,15 @@
             padding: 20px;
             font-size: 18px;
             font-weight: bold;
-            background-color: #4caf50;
-            color: white;
+            background-color: #555; /* Starts grayed out until loaded */
+            color: #aaa;
             border: none;
             border-radius: 12px;
-            cursor: pointer;
+            cursor: not-allowed;
             margin-bottom: 15px;
-            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
             display: block;
+            transition: all 0.3s ease;
         }
         #video-container {
             position: relative;
@@ -142,7 +143,7 @@
 
     <h1>Wall Tape AI Switch</h1>
     
-    <button id="btn-start">Tap to Start Camera & AI</button>
+    <button id="btn-start" disabled>Loading AI Core...</button>
 
     <div id="video-container">
         <video id="webcam" autoplay playsinline muted></video>
@@ -162,7 +163,7 @@
         </button>
     </div>
 
-    <div id="status">Waiting for activation...</div>
+    <div id="status">System booting...</div>
     <div id="debug-console">Console initialized.</div>
 
     <script>
@@ -191,8 +192,170 @@
             }
 
             try {
-                if (typeof tf !== 'undefined' && typeof knnClassifier !== 'undefined') {
-                    classifier = knnClassifier.create();
-                    logDebug("AI Libraries connected successfully.");
-                } else {
-                    logDebug("Error
+                classifier = knnClassifier.create();
+                logDebug("AI Engine loaded.");
+            } catch(e) {
+                logDebug("Engine build error: " + e.message);
+            }
+
+            async function setupWebcam() {
+                logDebug("Requesting phone lens access...");
+                const constraints = { 
+                    video: { 
+                        facingMode: 'user',
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    } 
+                };
+                
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    videoElement.srcObject = stream;
+                    return new Promise((resolve) => {
+                        videoElement.onloadedmetadata = () => {
+                            videoElement.play().then(() => {
+                                logDebug("Camera successfully active.");
+                                resolve();
+                            }).catch(e => {
+                                logDebug("Playback holding: " + e.message);
+                                resolve();
+                            });
+                        };
+                    });
+                } catch (err) {
+                    logDebug("Camera failed: " + err.message);
+                    statusElement.innerText = "Camera error.";
+                    throw err;
+                }
+            }
+
+            function captureFrame() {
+                if (!net) return null;
+                return tf.tidy(() => {
+                    const rawImg = tf.browser.fromPixels(videoElement);
+                    const batchedImg = rawImg.resizeBilinear([224, 224]).expandDims(0);
+                    return net.predict(batchedImg);
+                });
+            }
+
+            function addExample(label) {
+                if (!net || !classifier) return;
+                try {
+                    const activation = captureFrame();
+                    if (activation) {
+                        classifier.addExample(activation, label);
+                        counts[label] = (counts[label] || 0) + 1;
+                        const counterSpan = document.getElementById(`count-${label}`);
+                        if (counterSpan) counterSpan.innerText = counts[label];
+                        logDebug(`Trained "${label}" (${counts[label]})`);
+                    }
+                } catch (err) {
+                    logDebug("Training glitch: " + err.message);
+                }
+            }
+
+            document.getElementById('btn-me').addEventListener('click', () => addExample('me'));
+            document.getElementById('btn-background').addEventListener('click', () => addExample('background'));
+
+            function createCustomTrainingButton(label) {
+                if (counts[label] !== undefined) return; 
+                counts[label] = 0;
+
+                const btn = document.createElement('button');
+                btn.className = 'train-btn';
+                btn.style.backgroundColor = buttonColors[colorIndex % buttonColors.length];
+                colorIndex++;
+
+                btn.innerHTML = `<span>Train "${label}"</span> <span id="count-${label}">0</span>`;
+                btn.addEventListener('click', () => addExample(label));
+                
+                trainingButtonsContainer.appendChild(btn);
+            }
+
+            btnAddClass.addEventListener('click', () => {
+                const name = classNameInput.value.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+                if (name) {
+                    createCustomTrainingButton(name);
+                    classNameInput.value = "";
+                }
+            });
+
+            async function sendToHomeAssistant(label) {
+                if (label === lastSentState) return;
+                try {
+                    const response = await fetch(WEBHOOK_URL, {
+                        method: "POST",
+                        mode: "cors",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ option: label })
+                    });
+                    if (response.ok) {
+                        lastSentState = label;
+                        logDebug(`HA Webhook Sent $\rightarrow$ ${label}`);
+                    } else {
+                        logDebug(`HA Response error: ${response.status}`);
+                    }
+                } catch (error) {
+                    logDebug(`Network send error: ${error.message}`);
+                }
+            }
+
+            // Core Logic: Download engine IMMEDIATELY on load to bypass button blocks
+            async function initEngineInBackground() {
+                try {
+                    logDebug("Pre-fetching AI layers...");
+                    statusElement.innerText = "Downloading Model...";
+                    
+                    net = await tf.loadLayersModel('https://storage.googleapis.com/tfjs-models/tfjs/mobilenet_v1_0.25_224/model.json');
+                    
+                    logDebug("AI loaded! Button unlocked.");
+                    statusElement.innerText = "AI Ready! Unlock camera.";
+                    
+                    // Transformation: turn the button green and completely responsive
+                    btnStart.disabled = false;
+                    btnStart.innerText = "Tap to Start Camera";
+                    btnStart.style.backgroundColor = "#4caf50";
+                    btnStart.style.color = "#ffffff";
+                    btnStart.style.cursor = "pointer";
+                    btnStart.style.boxShadow = "0 4px 15px rgba(76, 175, 80, 0.4)";
+                } catch (err) {
+                    logDebug("Background download failed: " + err.message);
+                }
+            }
+
+            btnStart.addEventListener('click', async () => {
+                btnStart.style.display = 'none'; // Clear out immediately upon real human tap
+                
+                try {
+                    await setupWebcam();
+                    statusElement.innerText = "System running! Tap buttons.";
+
+                    setInterval(async () => {
+                        if (classifier && classifier.getNumClasses() > 0) {
+                            try {
+                                const activation = captureFrame();
+                                if (activation) {
+                                    const result = await classifier.predictClass(activation);
+                                    const label = result.label;
+                                    
+                                    statusElement.innerText = `Detected: ${label.toUpperCase()}`;
+                                    statusElement.className = (label === "me") ? "detected" : "clear";
+
+                                    sendToHomeAssistant(label);
+                                }
+                            } catch (loopErr) {
+                                console.error(loopErr);
+                            }
+                        }
+                    }, 400);
+                } catch (err) {
+                    logDebug("Camera connection failed: " + err.message);
+                }
+            });
+
+            // Start pre-loading immediately
+            initEngineInBackground();
+        });
+    </script>
+</body>
+</html>
