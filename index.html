@@ -29,7 +29,7 @@
     <div class="control-panel">
         <button class="bg-btn" id="bg-btn">🖼️ Set Empty Background</button>
         <br><br>
-        <input type="text" id="object-name" placeholder="e.g., wallet, phone, keys">
+        <input type="text" id="object-name" placeholder="e.g., me, hand, phone">
         <button class="train-btn" id="train-btn">📸 Train Object</button>
     </div>
 
@@ -46,7 +46,7 @@
 
     <script type="module">
         // --- HOME ASSISTANT WEBHOOK SETTINGS ---
-        const HA_IP = "YOUR_HOME_ASSISTANT_IP_HERE"; // Change this!
+        const HA_IP = "192.168.1.206:8123"; 
         const WEBHOOK_ID = "my_secret_wall_tape_trigger"; 
 
         const video = document.getElementById('webcam');
@@ -134,7 +134,7 @@
                 lastSentObject = objectName;
                 lastSentTime = currentTime;
                 try {
-                    await fetch(`http://${HA_IP}:8123/api/webhook/${WEBHOOK_ID}`, {
+                    await fetch(`http://${HA_IP}/api/webhook/${WEBHOOK_ID}`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ state: objectName })
