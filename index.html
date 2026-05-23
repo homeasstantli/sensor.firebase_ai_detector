@@ -234,21 +234,17 @@
                 debugConsole.innerText = msg + "\n" + debugConsole.innerText;
             }
 
-            // Load webhook settings from phone memory
             const savedWebhookId = localStorage.getItem('ha_webhook_id') || 'wall_tape_ai_trigger';
             webhookIdInput.value = savedWebhookId;
 
-            // Load custom name from phone memory
             const savedOptionName = localStorage.getItem('ha_option_name') || 'me';
             optionNameInput.value = savedOptionName;
             updateButtonLabels(savedOptionName);
 
-            // Save webhook changes instantly
             webhookIdInput.addEventListener('input', () => {
                 localStorage.setItem('ha_webhook_id', webhookIdInput.value.trim());
             });
 
-            // Save option name changes instantly and update button UI text
             optionNameInput.addEventListener('input', () => {
                 const cleanedName = optionNameInput.value.trim().toLowerCase().replace(/[^a-z0-9]/g, '_') || 'me';
                 localStorage.setItem('ha_option_name', cleanedName);
@@ -313,9 +309,7 @@
                 try {
                     const activation = captureFrame();
                     if (activation) {
-                        // If training the primary 'me' slot, we route it based on custom input
                         const activeLabel = (label === 'me') ? (optionNameInput.value.trim().toLowerCase() || 'me') : label;
-                        
                         classifier.addExample(activation, activeLabel);
                         
                         counts[label] = (counts[label] || 0) + 1;
@@ -355,10 +349,14 @@
             });
 
             async function sendToHomeAssistant(label) {
+                // Strict One-Time Gate check
                 if (label === lastSentState) return;
                 
                 const currentWebhookId = webhookIdInput.value.trim() || 'wall_tape_ai_trigger';
                 const fullUrl = BASE_HA_URL + currentWebhookId;
+                
+                // Set memory lock immediately to stop consecutive requests
+                lastSentState = label;
                 
                 try {
                     const response = await fetch(fullUrl, {
@@ -368,13 +366,15 @@
                         body: JSON.stringify({ option: label })
                     });
                     if (response.ok) {
-                        lastSentState = label;
                         logDebug(`Webhook [${currentWebhookId}] Sent -> ${label}`);
                     } else {
                         logDebug(`HA Error response: ${response.status}`);
+                        // Clear state memory if remote execution fails entirely
+                        lastSentState = "";
                     }
                 } catch (error) {
                     logDebug(`Network send error: ${error.message}`);
+                    lastSentState = "";
                 }
             }
 
