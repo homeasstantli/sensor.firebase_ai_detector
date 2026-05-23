@@ -46,8 +46,7 @@
 
     <script type="module">
         // --- HOME ASSISTANT WEBHOOK SETTINGS ---
-        const HA_IP = "192.168.1.206:8123"; 
-        const WEBHOOK_ID = "my_secret_wall_tape_trigger"; 
+        const TARGET_URL = "http://192.168.1.206:8123/api/webhook/my_secret_wall_tape_trigger"; 
 
         const video = document.getElementById('webcam');
         const statusDiv = document.getElementById('status');
@@ -134,14 +133,14 @@
                 lastSentObject = objectName;
                 lastSentTime = currentTime;
                 try {
-                    await fetch(`http://${HA_IP}/api/webhook/${WEBHOOK_ID}`, {
+                    await fetch(TARGET_URL, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ state: objectName })
                     });
-                    console.log("Webhook fired:", objectName);
+                    console.log("Webhook fired successfully:", objectName);
                 } catch (error) {
-                    console.error("Webhook network error:", error);
+                    console.error("Webhook network transmission error:", error);
                 }
             }
         }
