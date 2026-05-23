@@ -13,11 +13,12 @@
         body { font-family: sans-serif; text-align: center; background: #222; color: #fff; margin: 0; padding: 20px; }
         #video-container { display: flex; justify-content: center; margin-top: 15px; }
         video { border: 4px solid #00ffcc; border-radius: 8px; transform: scaleX(-1); background: #111; width: 400px; height: 300px; }
-        #status { font-size: 1.3em; margin: 15px; color: #00ffcc; }
+        #status { font-size: 1.3em; margin: 15px; color: #00ffcc; min-height: 40px; }
         .control-panel { background: #333; padding: 15px; border-radius: 8px; max-width: 500px; margin: 15px auto; }
         input, button { padding: 10px; font-size: 1em; margin: 5px; border-radius: 5px; border: none; }
         button { background: #00ffcc; font-weight: bold; cursor: pointer; }
         button:hover { background: #00e6b8; }
+        .bg-btn { background: #ff9900; color: black; }
         .train-btn { background: #ff3366; color: white; }
     </style>
 </head>
@@ -29,7 +30,10 @@
     <div id="status">Status: Click start button...</div>
 
     <div class="control-panel">
-        <h3>2. Train Custom Object</h3>
+        <h3>2. Set Your Environment</h3>
+        <button class="bg-btn" id="bg-btn">🖼️ Set Empty Background</button>
+        <hr style="border-color: #444; margin: 15px 0;">
+        <h3>3. Train Custom Object</h3>
         <input type="text" id="object-name" placeholder="e.g., wallet, phone, keys">
         <button class="train-btn" id="train-btn">📸 Train Object Image</button>
     </div>
@@ -42,7 +46,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // Your exact Firebase configuration
         const firebaseConfig = {
             apiKey: "AIzaSyCHwQZrRUYrgpAv1_JscdHvHBXCMH-1r8c",
             authDomain: "ha-object-detector.firebaseapp.com",
@@ -53,7 +56,6 @@
             measurementId: "G-TTFESRVCP3"
         };
 
-        // Initialize Firebase & Firestore
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
@@ -62,10 +64,11 @@
         let model, classifier;
         let lastSentObject = "";
         let lastSentTime = 0;
+        let isSystemReady = false;
 
-        // Set up button actions programmatically within the module scope
         document.getElementById('start-btn').addEventListener('click', initApp);
         document.getElementById('train-btn').addEventListener('click', trainCurrentFrame);
+        document.getElementById('bg-btn').addEventListener('click', captureBackgroundWithCountdown);
 
         async function initApp() {
             statusDiv.innerText = "Loading AI Core Engine (Please wait)...";
@@ -74,22 +77,56 @@
                 model = await mobilenet.load();
                 
                 statusDiv.innerText = "AI Loaded. Requesting camera access...";
-                
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 400, height: 300 } });
                 video.srcObject = stream;
                 video.play();
                 
-                statusDiv.innerText = "System Ready! Train an object to start tracking.";
-                startPredictionLoop();
+                statusDiv.innerText = "👉 Click 'Set Empty Background' first!";
+                isSystemReady = true;
             } catch (err) {
-                statusDiv.innerText = "❌ Initialization Error. Check browser console logs.";
+                statusDiv.innerText = "❌ Initialization Error.";
                 console.error(err);
             }
+        }
+
+        // Countdown sequence so you have time to move out of the frame
+        function captureBackgroundWithCountdown() {
+            if (!isSystemReady) { alert("Please start the camera first!"); return; }
+            
+            // Clear previous model data completely to prevent the 100% lock bug
+            classifier.clearAllClasses();
+            
+            let countdown = 3;
+            statusDiv.innerText = `⚠️ Clear the frame! Capturing background in ${countdown}...`;
+            
+            const timer = setInterval(async () => {
+                countdown--;
+                if (countdown > 0) {
+                    statusDiv.innerText = `⚠️ Clear the frame! Capturing background in ${countdown}...`;
+                } else {
+                    clearInterval(timer);
+                    statusDiv.innerText = "📸 Capturing background now...";
+                    
+                    // Automatically take 15 samples of the empty room rapidly
+                    for (let i = 0; i < 15; i++) {
+                        const img = tf.browser.fromPixels(video);
+                        const logits = model.infer(img, true);
+                        classifier.addExample(logits, 'background');
+                        img.dispose();
+                        await new Promise(r => setTimeout(r, 50));
+                    }
+                    
+                    statusDiv.innerText = "✅ Background set! You can now step back in and train your objects.";
+                    saveToFirebase("background", "active");
+                    startPredictionLoop();
+                }
+            }, 1000);
         }
 
         async function trainCurrentFrame() {
             const label = document.getElementById('object-name').value.trim().toLowerCase();
             if (!label) { alert("Please type a name first!"); return; }
+            if (label === 'background') { alert("Use the dedicated orange button for background!"); return; }
 
             statusDiv.innerText = `Training "${label}"... Keep object stable.`;
             const img = tf.browser.fromPixels(video);
@@ -102,6 +139,10 @@
         }
 
         async function startPredictionLoop() {
+            // Only start the loop once background or classes are set up
+            if (window.predictionLoopRunning) return;
+            window.predictionLoopRunning = true;
+
             while (true) {
                 if (classifier.getNumClasses() > 0) {
                     const img = tf.browser.fromPixels(video);
@@ -112,7 +153,8 @@
                         const detectedObject = result.label;
                         const confidence = result.confidences[detectedObject];
 
-                        if (confidence > 0.80) {
+                        // Requires 85% match confidence to switch states
+                        if (confidence > 0.85) {
                             statusDiv.innerText = `Seeing: ${detectedObject} (${Math.round(confidence * 100)}%)`;
                             saveToFirebase(detectedObject, "active");
                         }
@@ -126,7 +168,6 @@
 
         async function saveToFirebase(objectName, objectStatus) {
             let currentTime = Date.now();
-            
             if (objectName !== lastSentObject || (currentTime - lastSentTime > 4000)) {
                 lastSentObject = objectName;
                 lastSentTime = currentTime;
