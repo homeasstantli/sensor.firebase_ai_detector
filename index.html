@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Wall Tape AI Switch</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier"></script>
     <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -39,8 +39,8 @@
             transform: scaleX(-1);
         }
         #status {
-            margin: 20px 0;
-            font-size: 18px;
+            margin: 15px 0;
+            font-size: 16px;
             font-weight: bold;
             padding: 10px 20px;
             border-radius: 20px;
@@ -48,16 +48,24 @@
             min-width: 150px;
             text-align: center;
         }
-        .detected {
-            background-color: #2e7d32 !important;
-        }
-        .clear {
-            background-color: #c62828 !important;
+        #debug-console {
+            width: 100%;
+            max-width: 400px;
+            background: #000;
+            color: #00ff00;
+            font-family: monospace;
+            font-size: 11px;
+            padding: 10px;
+            border-radius: 6px;
+            max-height: 80px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            box-sizing: border-box;
         }
         .setup-container {
             width: 100%;
             max-width: 400px;
-            margin-top: 15px;
+            margin-top: 10px;
             display: flex;
             gap: 10px;
         }
@@ -91,28 +99,29 @@
         }
         .train-btn {
             width: 100%;
-            padding: 15px;
+            padding: 16px;
             font-size: 16px;
             font-weight: bold;
             border: none;
             border-radius: 8px;
             cursor: pointer;
             color: white;
-            transition: opacity 0.2s;
-            -webkit-user-select: none;
-            user-select: none;
-            text-align: left;
+            touch-action: manipulation;
             display: flex;
             justify-content: space-between;
+            -webkit-tap-highlight-color: transparent;
         }
         .train-btn:active {
-            opacity: 0.7;
+            opacity: 0.6;
         }
+        .detected { background-color: #2e7d32 !important; }
+        .clear { background-color: #c62828 !important; }
     </style>
 </head>
 <body>
 
     <h1>Wall Tape AI Switch</h1>
+    
     <div id="video-container">
         <video id="webcam" autoplay playsinline muted></video>
     </div>
@@ -123,19 +132,21 @@
     </div>
 
     <div id="training-buttons" class="button-container">
-        <button class="train-btn" style="background-color: #1976d2;" onclick="addExample('me')">
+        <button class="train-btn" style="background-color: #1976d2;" id="btn-me">
             <span>Train "me"</span> <span id="count-me">0</span>
         </button>
-        <button class="train-btn" style="background-color: #616161;" onclick="addExample('background')">
+        <button class="train-btn" style="background-color: #616161;" id="btn-background">
             <span>Train "background"</span> <span id="count-background">0</span>
         </button>
     </div>
 
-    <div id="status">Loading AI Model...</div>
+    <div id="status">Initializing system...</div>
+    <div id="debug-console">Console ready...</div>
 
     <script>
         const videoElement = document.getElementById('webcam');
         const statusElement = document.getElementById('status');
+        const debugConsole = document.getElementById('debug-console');
         const trainingButtonsContainer = document.getElementById('training-buttons');
         const classNameInput = document.getElementById('class-name-input');
         const btnAddClass = document.getElementById('btn-add-class');
@@ -143,8 +154,6 @@
         let net;
         const classifier = knnClassifier.create();
         let lastSentState = "";
-        
-        // Track image counts for both static and custom classes
         let counts = { me: 0, background: 0 };
 
         const buttonColors = ["#e91e63", "#9c27b0", "#009688", "#4caf50", "#ff5722"];
@@ -152,26 +161,41 @@
 
         const HA_URL = "http://192.168.1.206:8123/api/services/input_select/select_option";
 
-        async function setupWebcam() {
-            return new Promise((resolve, reject) => {
-                const constraints = { video: { facingMode: 'user' } };
-                navigator.mediaDevices.getUserMedia(constraints)
-                    .then(stream => {
-                        videoElement.srcObject = stream;
-                        videoElement.onloadedmetadata = () => resolve();
-                    })
-                    .catch(err => {
-                        console.error("Webcam access denied: ", err);
-                        statusElement.innerText = "Error: Camera blocked!";
-                        reject(err);
-                    });
-            });
+        function logDebug(msg) {
+            console.log(msg);
+            debugConsole.innerText = msg + "\n" + debugConsole.innerText;
         }
 
-        // Available globally for button onclick triggers
-        window.addExample = function(label) {
+        async function setupWebcam() {
+            logDebug("Requesting camera access...");
+            const constraints = { 
+                video: { 
+                    facingMode: 'user',
+                    width: { ideal: 224 },
+                    height: { ideal: 224 }
+                } 
+            };
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                videoElement.srcObject = stream;
+                return new Promise((resolve) => {
+                    videoElement.onloadedmetadata = () => {
+                        videoElement.play();
+                        logDebug("Camera playing successfully.");
+                        resolve();
+                    };
+                });
+            } catch (err) {
+                logDebug("Camera Error: " + err.message);
+                statusElement.innerText = "Camera Error! Check settings.";
+                throw err;
+            }
+        }
+
+        function addExample(label) {
             if (!net) {
-                alert("Please wait for the AI model to finish loading before training!");
+                logDebug("Error: Model not loaded yet.");
                 return;
             }
             try {
@@ -179,20 +203,23 @@
                 const activation = net.predict(img.expandDims(0));
                 classifier.addExample(activation, label);
                 
-                counts[label]++;
+                counts[label] = (counts[label] || 0) + 1;
                 const counterSpan = document.getElementById(`count-${label}`);
                 if (counterSpan) counterSpan.innerText = counts[label];
                 
                 img.dispose();
+                logDebug(`Trained "${label}" (${counts[label]})`);
             } catch (err) {
-                console.error("Failed to process training frame:", err);
+                logDebug("Training crash: " + err.message);
             }
         }
 
-        // Dynamically add completely new items from the input field
+        // Attach touch/click listeners to core buttons cleanly
+        document.getElementById('btn-me').addEventListener('click', () => addExample('me'));
+        document.getElementById('btn-background').addEventListener('click', () => addExample('background'));
+
         function createCustomTrainingButton(label) {
             if (counts[label] !== undefined) return; 
-            
             counts[label] = 0;
 
             const btn = document.createElement('button');
@@ -201,9 +228,10 @@
             colorIndex++;
 
             btn.innerHTML = `<span>Train "${label}"</span> <span id="count-${label}">0</span>`;
-            btn.addEventListener('click', () => window.addExample(label));
+            btn.addEventListener('click', () => addExample(label));
             
             trainingButtonsContainer.appendChild(btn);
+            logDebug(`Added custom button: ${label}`);
         }
 
         btnAddClass.addEventListener('click', () => {
@@ -216,7 +244,6 @@
 
         async function sendToHomeAssistant(label) {
             if (label === lastSentState) return;
-
             try {
                 const response = await fetch(HA_URL, {
                     method: "POST",
@@ -226,21 +253,26 @@
                         option: label
                     })
                 });
-                if (response.ok) lastSentState = label;
+                if (response.ok) {
+                    lastSentState = label;
+                    logDebug(`HA Updated: ${label}`);
+                }
             } catch (error) {
-                console.error("Network connection to HA failed:", error);
+                console.error("HA Sync error:", error);
             }
         }
 
         async function app() {
             try {
-                statusElement.innerText = "Loading MobileNet Engine...";
+                logDebug("Downloading TensorFlow model...");
+                statusElement.innerText = "Loading AI Engine...";
                 net = await tf.loadLayersModel('https://storage.googleapis.com/tfjs-models/tfjs/mobilenet_v1_0.25_224/model.json');
                 
-                statusElement.innerText = "Starting Video Feed...";
+                logDebug("Model loaded. Connecting webcam...");
                 await setupWebcam();
                 
-                statusElement.innerText = "AI Ready! Tap buttons to train.";
+                statusElement.innerText = "AI Ready! Tap buttons.";
+                logDebug("System running cleanly.");
 
                 setInterval(async () => {
                     if (classifier.getNumClasses() > 0) {
@@ -250,20 +282,14 @@
                         
                         const label = result.label;
                         statusElement.innerText = `Detected: ${label.toUpperCase()}`;
-                        
-                        if (label === "me") {
-                            statusElement.className = "detected";
-                        } else {
-                            statusElement.className = "clear";
-                        }
+                        statusElement.className = (label === "me") ? "detected" : "clear";
 
                         sendToHomeAssistant(label);
                         img.dispose();
                     }
                 }, 400);
             } catch (err) {
-                statusElement.innerText = "Initialization failed.";
-                console.error(err);
+                logDebug("App init failed: " + err.message);
             }
         }
 
