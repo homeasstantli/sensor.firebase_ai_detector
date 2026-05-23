@@ -69,6 +69,7 @@
             border-radius: 8px;
             background-color: #333;
             color: white;
+            outline: none;
         }
         #btn-add-class {
             padding: 12px 20px;
@@ -121,7 +122,14 @@
         <button id="btn-add-class">Add Thing</button>
     </div>
 
-    <div id="training-buttons" class="button-container"></div>
+    <div id="training-buttons" class="button-container">
+        <button class="train-btn" style="background-color: #1976d2;" onclick="addExample('me')">
+            <span>Train "me"</span> <span id="count-me">0</span>
+        </button>
+        <button class="train-btn" style="background-color: #616161;" onclick="addExample('background')">
+            <span>Train "background"</span> <span id="count-background">0</span>
+        </button>
+    </div>
 
     <div id="status">Loading AI Model...</div>
 
@@ -135,51 +143,131 @@
         let net;
         const classifier = knnClassifier.create();
         let lastSentState = "";
-        let counts = {};
+        
+        // Track image counts for both static and custom classes
+        let counts = { me: 0, background: 0 };
 
-        // Colors to cycle through for custom buttons
-        const buttonColors = ["#1976d2", "#616161", "#e91e63", "#9c27b0", "#009688"];
+        const buttonColors = ["#e91e63", "#9c27b0", "#009688", "#4caf50", "#ff5722"];
         let colorIndex = 0;
 
         const HA_URL = "http://192.168.1.206:8123/api/services/input_select/select_option";
 
         async function setupWebcam() {
             return new Promise((resolve, reject) => {
-                const navigatorAny = navigator;
-                navigator.getUserMedia = navigator.getUserMedia ||
-                    navigatorAny.webkitGetUserMedia || navigatorAny.mozGetUserMedia || navigatorAny.msGetUserMedia;
-                if (navigator.getUserMedia) {
-                    navigator.getUserMedia({ video: { facingMode: 'user' } },
-                        stream => {
-                            videoElement.srcObject = stream;
-                            videoElement.addEventListener('loadeddata', () => resolve(), false);
-                        },
-                        error => reject());
-                } else {
-                    reject();
-                }
+                const constraints = { video: { facingMode: 'user' } };
+                navigator.mediaDevices.getUserMedia(constraints)
+                    .then(stream => {
+                        videoElement.srcObject = stream;
+                        videoElement.onloadedmetadata = () => resolve();
+                    })
+                    .catch(err => {
+                        console.error("Webcam access denied: ", err);
+                        statusElement.innerText = "Error: Camera blocked!";
+                        reject(err);
+                    });
             });
         }
 
-        // Adds a camera frame sample into the AI memory
-        function addExample(label) {
-            if (!net) return;
-            const img = tf.browser.fromPixels(videoElement);
-            const activation = net.predict(img.expandDims(0));
-            classifier.addExample(activation, label);
-            
-            // Increment and display the training count
-            counts[label]++;
-            document.getElementById(`count-${label}`).innerText = counts[label];
-            
-            img.dispose();
+        // Available globally for button onclick triggers
+        window.addExample = function(label) {
+            if (!net) {
+                alert("Please wait for the AI model to finish loading before training!");
+                return;
+            }
+            try {
+                const img = tf.browser.fromPixels(videoElement);
+                const activation = net.predict(img.expandDims(0));
+                classifier.addExample(activation, label);
+                
+                counts[label]++;
+                const counterSpan = document.getElementById(`count-${label}`);
+                if (counterSpan) counterSpan.innerText = counts[label];
+                
+                img.dispose();
+            } catch (err) {
+                console.error("Failed to process training frame:", err);
+            }
         }
 
-        // Dynamically build a new button on screen for a classification item
-        function createTrainingButton(label) {
-            if (counts[label] !== undefined) return; // Prevent duplicates
+        // Dynamically add completely new items from the input field
+        function createCustomTrainingButton(label) {
+            if (counts[label] !== undefined) return; 
             
             counts[label] = 0;
 
             const btn = document.createElement('button');
             btn.className = 'train-btn';
+            btn.style.backgroundColor = buttonColors[colorIndex % buttonColors.length];
+            colorIndex++;
+
+            btn.innerHTML = `<span>Train "${label}"</span> <span id="count-${label}">0</span>`;
+            btn.addEventListener('click', () => window.addExample(label));
+            
+            trainingButtonsContainer.appendChild(btn);
+        }
+
+        btnAddClass.addEventListener('click', () => {
+            const name = classNameInput.value.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+            if (name) {
+                createCustomTrainingButton(name);
+                classNameInput.value = "";
+            }
+        });
+
+        async function sendToHomeAssistant(label) {
+            if (label === lastSentState) return;
+
+            try {
+                const response = await fetch(HA_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        entity_id: "input_select.wall_tape_switch",
+                        option: label
+                    })
+                });
+                if (response.ok) lastSentState = label;
+            } catch (error) {
+                console.error("Network connection to HA failed:", error);
+            }
+        }
+
+        async function app() {
+            try {
+                statusElement.innerText = "Loading MobileNet Engine...";
+                net = await tf.loadLayersModel('https://storage.googleapis.com/tfjs-models/tfjs/mobilenet_v1_0.25_224/model.json');
+                
+                statusElement.innerText = "Starting Video Feed...";
+                await setupWebcam();
+                
+                statusElement.innerText = "AI Ready! Tap buttons to train.";
+
+                setInterval(async () => {
+                    if (classifier.getNumClasses() > 0) {
+                        const img = tf.browser.fromPixels(videoElement);
+                        const activation = net.predict(img.expandDims(0));
+                        const result = await classifier.predictClass(activation);
+                        
+                        const label = result.label;
+                        statusElement.innerText = `Detected: ${label.toUpperCase()}`;
+                        
+                        if (label === "me") {
+                            statusElement.className = "detected";
+                        } else {
+                            statusElement.className = "clear";
+                        }
+
+                        sendToHomeAssistant(label);
+                        img.dispose();
+                    }
+                }, 400);
+            } catch (err) {
+                statusElement.innerText = "Initialization failed.";
+                console.error(err);
+            }
+        }
+
+        app();
+    </script>
+</body>
+</html>
