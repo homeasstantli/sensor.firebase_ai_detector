@@ -3,147 +3,157 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trainable Webhook AI Switch</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier@1.2.4"></script>
+    <title>Wall Tape AI Switch</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #222; color: #fff; margin: 0; padding: 20px; }
-        #status { font-size: 1.3em; margin: 15px; color: #00ffcc; min-height: 40px; }
-        .control-panel { background: #333; padding: 15px; border-radius: 8px; max-width: 500px; margin: 15px auto; }
-        input, button { padding: 10px; font-size: 1em; margin: 5px; border-radius: 5px; border: none; font-weight: bold; cursor: pointer; }
-        button { background: #00ffcc; color: #222; }
-        .bg-btn { background: #ff9900; color: black; }
-        .train-btn { background: #ff3366; color: white; }
-        #video-container { display: flex; justify-content: center; margin-top: 15px; position: relative; width: 400px; height: 300px; margin-left: auto; margin-right: auto; }
-        video { border: 4px solid #00ffcc; border-radius: 8px; transform: scaleX(-1); background: #111; width: 400px; height: 300px; }
-        #video-overlay { position: absolute; top: 4px; left: 4px; width: 392px; height: 292px; background: rgba(0,0,0,0.9); border-radius: 6px; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 10; }
-        #confidence-box { margin-top: 15px; background: #2a2a2a; padding: 10px; border-radius: 6px; display: inline-block; min-width: 200px; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        h1 {
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+        #video-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            background-color: #000;
+        }
+        video {
+            width: 100%;
+            display: block;
+            transform: scaleX(-1);
+        }
+        #status {
+            margin: 20px 0;
+            font-size: 18px;
+            font-weight: bold;
+            padding: 10px 20px;
+            border-radius: 20px;
+            background-color: #333;
+            min-width: 150px;
+            text-align: center;
+        }
+        .detected {
+            background-color: #2e7d32 !important;
+        }
+        .clear {
+            background-color: #c62828 !important;
+        }
     </style>
 </head>
 <body>
 
-    <h1>Trainable Web AI (Native Webhook)</h1>
-    <div id="status">Status: Waiting to start...</div>
-
-    <div class="control-panel">
-        <button class="bg-btn" id="bg-btn">🖼️ Set Empty Background</button>
-        <br><br>
-        <input type="text" id="object-name" placeholder="e.g., me, hand, phone">
-        <button class="train-btn" id="train-btn">📸 Train Object</button>
-    </div>
-
+    <h1>Wall Tape AI Switch</h1>
     <div id="video-container">
-        <div id="video-overlay">
-            <button id="activate-btn" style="font-size: 1.2em; padding: 15px;">🎥 START LIVE CAMERA FEED</button>
-        </div>
         <video id="webcam" autoplay playsinline muted></video>
     </div>
+    <div id="status">Loading AI Model...</div>
 
-    <div id="confidence-box">
-        <div id="confidence-list">No objects trained yet...</div>
-    </div>
-
-    <script type="module">
-        // --- HOME ASSISTANT WEBHOOK SETTINGS ---
-        const TARGET_URL = "http://192.168.1.206:8123/api/webhook/my_secret_wall_tape_trigger"; 
-
-        const video = document.getElementById('webcam');
-        const statusDiv = document.getElementById('status');
-        const videoOverlay = document.getElementById('video-overlay');
-        const confidenceList = document.getElementById('confidence-list');
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const statusElement = document.getElementById('status');
         
-        let model, classifier, lastSentObject = "", lastSentTime = 0, isSystemReady = false;
+        let net;
+        const classifier = knnClassifier.create();
+        let lastSentState = "";
 
-        document.getElementById('train-btn').addEventListener('click', trainCurrentFrame);
-        document.getElementById('bg-btn').addEventListener('click', captureBackgroundWithCountdown);
-        document.getElementById('activate-btn').addEventListener('click', initApp);
+        // Change this if your Home Assistant IP changes
+        const HA_URL = "http://192.168.1.206:8123/api/services/input_select/select_option";
 
-        async function initApp() {
-            statusDiv.innerText = "⚡ Loading AI Engine...";
+        async function setupWebcam() {
+            return new Promise((resolve, reject) => {
+                const navigatorAny = navigator;
+                navigator.getUserMedia = navigator.getUserMedia ||
+                    navigatorAny.webkitGetUserMedia || navigatorAny.mozGetUserMedia || navigatorAny.msGetUserMedia;
+                if (navigator.getUserMedia) {
+                    navigator.getUserMedia({ video: { facingMode: 'user' } },
+                        stream => {
+                            videoElement.srcObject = stream;
+                            videoElement.addEventListener('loadeddata', () => resolve(), false);
+                        },
+                        error => reject());
+                } else {
+                    reject();
+                }
+            });
+        }
+
+        async function sendToHomeAssistant(label) {
+            // Only send a network request if the state actually changes
+            if (label === lastSentState) return;
+
             try {
-                classifier = knnClassifier.create();
-                model = await mobilenet.load();
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 400, height: 300, facingMode: "user" }, audio: false });
-                video.srcObject = stream;
-                await video.play();
-                videoOverlay.style.display = 'none';
-                statusDiv.innerText = "👉 Camera Connected! Step back and click 'Set Empty Background'.";
-                isSystemReady = true;
-            } catch (err) {
-                statusDiv.innerText = "🔒 Camera Error. Check your browser permissions.";
+                const response = await fetch(HA_URL, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        entity_id: "input_select.wall_tape_switch",
+                        option: label
+                    })
+                });
+                
+                if (response.ok) {
+                    console.log(`Successfully updated HA to: ${label}`);
+                    lastSentState = label;
+                } else {
+                    console.error("HA responded with an error status code.");
+                }
+            } catch (error) {
+                console.error("Network error trying to connect to Home Assistant:", error);
             }
         }
 
-        function captureBackgroundWithCountdown() {
-            if (!isSystemReady) return;
-            let countdown = 3;
-            const timer = setInterval(async () => {
-                countdown--;
-                if (countdown > 0) { statusDiv.innerText = `⚠️ Capturing background in ${countdown}...`; } 
-                else {
-                    clearInterval(timer);
-                    for (let i = 0; i < 15; i++) {
-                        const img = tf.browser.fromPixels(video);
-                        classifier.addExample(model.infer(img, true), 'background');
-                        img.dispose();
-                        await new Promise(r => setTimeout(r, 50));
-                    }
-                    statusDiv.innerText = "✅ Background set! Train your target object now.";
-                    sendWebhookNotification("background");
-                    startPredictionLoop();
-                }
-            }, 1000);
-        }
+        async function app() {
+            statusElement.innerText = "Loading MobileNet...";
+            net = await tf.loadLayersModel('https://storage.googleapis.com/tfjs-models/tfjs/mobilenet_v1_0.25_224/model.json');
+            statusElement.innerText = "Camera starting...";
+            
+            await setupWebcam();
+            statusElement.innerText = "AI Active - Scanning Room";
 
-        async function trainCurrentFrame() {
-            const label = document.getElementById('object-name').value.trim().toLowerCase();
-            if (!label || label === 'background') return;
-            statusDiv.innerText = `Training "${label}"...`;
-            const img = tf.browser.fromPixels(video);
-            classifier.addExample(model.infer(img, true), label);
-            img.dispose();
-            statusDiv.innerText = `Trained: ${label}`;
-        }
-
-        async function startPredictionLoop() {
-            while (true) {
+            // Temporary continuous loop to evaluate camera frames
+            setInterval(async () => {
                 if (classifier.getNumClasses() > 0) {
-                    const img = tf.browser.fromPixels(video);
-                    try {
-                        const result = await classifier.predictClass(model.infer(img, true));
-                        const detectedObject = result.label;
-                        const confidence = result.confidences[detectedObject];
-
-                        if (confidence >= 0.85) {
-                            statusDiv.innerText = `Seeing: ${detectedObject} (${Math.round(confidence * 100)}%)`;
-                            sendWebhookNotification(detectedObject);
-                        }
-                    } catch (e) {}
+                    const img = tf.browser.fromPixels(videoElement);
+                    const activation = net.predict(img.expandDims(0));
+                    const result = await classifier.predictClass(activation);
+                    
+                    const label = result.label;
+                    
+                    if (label === "me") {
+                        statusElement.innerText = "Detected: Me";
+                        statusElement.className = "detected";
+                        sendToHomeAssistant("me");
+                    } else {
+                        statusElement.innerText = "Clear: Background";
+                        statusElement.className = "clear";
+                        sendToHomeAssistant("background");
+                    }
+                    
                     img.dispose();
                 }
-                await tf.nextFrame();
-                await new Promise(r => setTimeout(r, 400));
-            }
+            }, 500);
         }
 
-        async function sendWebhookNotification(objectName) {
-            let currentTime = Date.now();
-            if (objectName !== lastSentObject || (currentTime - lastSentTime > 3000)) {
-                lastSentObject = objectName;
-                lastSentTime = currentTime;
-                try {
-                    await fetch(TARGET_URL, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ state: objectName })
-                    });
-                    console.log("Webhook fired successfully:", objectName);
-                } catch (error) {
-                    console.error("Webhook network transmission error:", error);
-                }
-            }
-        }
+        // Initialize the tracking application
+        app();
     </script>
 </body>
 </html>
