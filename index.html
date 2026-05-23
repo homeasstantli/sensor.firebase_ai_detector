@@ -23,9 +23,39 @@
             box-sizing: border-box;
         }
         h1 {
-            margin-bottom: 10px;
+            margin-bottom: 5px;
             font-size: 24px;
             text-align: center;
+        }
+        .config-box {
+            width: 100%;
+            max-width: 400px;
+            background-color: #2a2a2a;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            border: 1px solid #444;
+        }
+        .config-box label {
+            display: block;
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 5px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .config-box input {
+            width: 100%;
+            padding: 10px;
+            font-size: 14px;
+            border: none;
+            border-radius: 6px;
+            background-color: #1a1a1a;
+            color: #00ff00;
+            font-family: monospace;
+            outline: none;
+            box-sizing: border-box;
         }
         #btn-start {
             width: 100%;
@@ -33,7 +63,7 @@
             padding: 20px;
             font-size: 18px;
             font-weight: bold;
-            background-color: #555; /* Starts grayed out until loaded */
+            background-color: #555;
             color: #aaa;
             border: none;
             border-radius: 12px;
@@ -143,6 +173,16 @@
 
     <h1>Wall Tape AI Switch</h1>
     
+    <div class="config-box">
+        <label for="webhook-id-input">Home Assistant Webhook ID</label>
+        <input type="text" id="webhook-id-input" placeholder="e.g., wall_tape_ai_trigger">
+    </div>
+
+    <div class="config-box">
+        <label for="option-name-input">AI Option Name to Send</label>
+        <input type="text" id="option-name-input" placeholder="e.g., me">
+    </div>
+    
     <button id="btn-start" disabled>Loading AI Core...</button>
 
     <div id="video-container">
@@ -156,7 +196,7 @@
 
     <div id="training-buttons" class="button-container">
         <button class="train-btn" style="background-color: #1976d2;" id="btn-me">
-            <span>Train "me"</span> <span id="count-me">0</span>
+            <span>Train "<span class="lbl-me">me</span>"</span> <span id="count-me">0</span>
         </button>
         <button class="train-btn" style="background-color: #616161;" id="btn-background">
             <span>Train "background"</span> <span id="count-background">0</span>
@@ -175,6 +215,9 @@
             const classNameInput = document.getElementById('class-name-input');
             const btnAddClass = document.getElementById('btn-add-class');
             const btnStart = document.getElementById('btn-start');
+            const webhookIdInput = document.getElementById('webhook-id-input');
+            const optionNameInput = document.getElementById('option-name-input');
+            const labelMeSpans = document.querySelectorAll('.lbl-me');
             
             let net = null;
             let classifier = null;
@@ -184,11 +227,38 @@
             const buttonColors = ["#e91e63", "#9c27b0", "#009688", "#4caf50", "#ff5722"];
             let colorIndex = 0;
 
-            const WEBHOOK_URL = "http://192.168.1.206:8123/api/webhook/wall_tape_ai_trigger";
+            const BASE_HA_URL = "http://192.168.1.206:8123/api/webhook/";
 
             function logDebug(msg) {
                 console.log(msg);
                 debugConsole.innerText = msg + "\n" + debugConsole.innerText;
+            }
+
+            // Load webhook settings from phone memory
+            const savedWebhookId = localStorage.getItem('ha_webhook_id') || 'wall_tape_ai_trigger';
+            webhookIdInput.value = savedWebhookId;
+
+            // Load custom name from phone memory
+            const savedOptionName = localStorage.getItem('ha_option_name') || 'me';
+            optionNameInput.value = savedOptionName;
+            updateButtonLabels(savedOptionName);
+
+            // Save webhook changes instantly
+            webhookIdInput.addEventListener('input', () => {
+                localStorage.setItem('ha_webhook_id', webhookIdInput.value.trim());
+            });
+
+            // Save option name changes instantly and update button UI text
+            optionNameInput.addEventListener('input', () => {
+                const cleanedName = optionNameInput.value.trim().toLowerCase().replace(/[^a-z0-9]/g, '_') || 'me';
+                localStorage.setItem('ha_option_name', cleanedName);
+                updateButtonLabels(cleanedName);
+            });
+
+            function updateButtonLabels(newName) {
+                labelMeSpans.forEach(span => {
+                    span.innerText = newName;
+                });
             }
 
             try {
@@ -243,11 +313,15 @@
                 try {
                     const activation = captureFrame();
                     if (activation) {
-                        classifier.addExample(activation, label);
+                        // If training the primary 'me' slot, we route it based on custom input
+                        const activeLabel = (label === 'me') ? (optionNameInput.value.trim().toLowerCase() || 'me') : label;
+                        
+                        classifier.addExample(activation, activeLabel);
+                        
                         counts[label] = (counts[label] || 0) + 1;
                         const counterSpan = document.getElementById(`count-${label}`);
                         if (counterSpan) counterSpan.innerText = counts[label];
-                        logDebug(`Trained "${label}" (${counts[label]})`);
+                        logDebug(`Trained "${activeLabel}" (${counts[label]})`);
                     }
                 } catch (err) {
                     logDebug("Training glitch: " + err.message);
@@ -282,8 +356,12 @@
 
             async function sendToHomeAssistant(label) {
                 if (label === lastSentState) return;
+                
+                const currentWebhookId = webhookIdInput.value.trim() || 'wall_tape_ai_trigger';
+                const fullUrl = BASE_HA_URL + currentWebhookId;
+                
                 try {
-                    const response = await fetch(WEBHOOK_URL, {
+                    const response = await fetch(fullUrl, {
                         method: "POST",
                         mode: "cors",
                         headers: { "Content-Type": "application/json" },
@@ -291,16 +369,15 @@
                     });
                     if (response.ok) {
                         lastSentState = label;
-                        logDebug(`HA Webhook Sent $\rightarrow$ ${label}`);
+                        logDebug(`Webhook [${currentWebhookId}] Sent -> ${label}`);
                     } else {
-                        logDebug(`HA Response error: ${response.status}`);
+                        logDebug(`HA Error response: ${response.status}`);
                     }
                 } catch (error) {
                     logDebug(`Network send error: ${error.message}`);
                 }
             }
 
-            // Core Logic: Download engine IMMEDIATELY on load to bypass button blocks
             async function initEngineInBackground() {
                 try {
                     logDebug("Pre-fetching AI layers...");
@@ -311,7 +388,6 @@
                     logDebug("AI loaded! Button unlocked.");
                     statusElement.innerText = "AI Ready! Unlock camera.";
                     
-                    // Transformation: turn the button green and completely responsive
                     btnStart.disabled = false;
                     btnStart.innerText = "Tap to Start Camera";
                     btnStart.style.backgroundColor = "#4caf50";
@@ -324,7 +400,7 @@
             }
 
             btnStart.addEventListener('click', async () => {
-                btnStart.style.display = 'none'; // Clear out immediately upon real human tap
+                btnStart.style.display = 'none';
                 
                 try {
                     await setupWebcam();
@@ -339,7 +415,9 @@
                                     const label = result.label;
                                     
                                     statusElement.innerText = `Detected: ${label.toUpperCase()}`;
-                                    statusElement.className = (label === "me") ? "detected" : "clear";
+                                    
+                                    const primaryName = optionNameInput.value.trim().toLowerCase() || 'me';
+                                    statusElement.className = (label === primaryName) ? "detected" : "clear";
 
                                     sendToHomeAssistant(label);
                                 }
@@ -353,7 +431,6 @@
                 }
             });
 
-            // Start pre-loading immediately
             initEngineInBackground();
         });
     </script>
