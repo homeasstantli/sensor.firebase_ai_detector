@@ -79,7 +79,7 @@
             font-size: 11px;
             padding: 10px;
             border-radius: 6px;
-            max-height: 100px;
+            max-height: 120px;
             overflow-y: auto;
             margin-bottom: 10px;
             box-sizing: border-box;
@@ -166,7 +166,6 @@
     <div id="debug-console">Console initialized.</div>
 
     <script>
-        // Wrapped inside a safe load check to guarantee layout renders no matter what
         document.addEventListener("DOMContentLoaded", () => {
             const videoElement = document.getElementById('webcam');
             const statusElement = document.getElementById('status');
@@ -191,166 +190,9 @@
                 debugConsole.innerText = msg + "\n" + debugConsole.innerText;
             }
 
-            // Verify library inclusion safely
             try {
                 if (typeof tf !== 'undefined' && typeof knnClassifier !== 'undefined') {
                     classifier = knnClassifier.create();
                     logDebug("AI Libraries connected successfully.");
                 } else {
-                    logDebug("Error: AI scripts blocked by browser.");
-                }
-            } catch(e) {
-                logDebug("Library setup error: " + e.message);
-            }
-
-            async function setupWebcam() {
-                logDebug("Accessing camera stream...");
-                const constraints = { 
-                    video: { 
-                        facingMode: 'user',
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    } 
-                };
-                
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                    videoElement.srcObject = stream;
-                    return new Promise((resolve) => {
-                        videoElement.onloadedmetadata = () => {
-                            videoElement.play().then(() => {
-                                logDebug("Camera stream active.");
-                                resolve();
-                            }).catch(e => {
-                                logDebug("Playback pause: " + e.message);
-                                resolve();
-                            });
-                        };
-                    });
-                } catch (err) {
-                    logDebug("Camera failed: " + err.message);
-                    statusElement.innerText = "Camera error.";
-                    throw err;
-                }
-            }
-
-            function captureFrame() {
-                if (!net) return null;
-                return tf.tidy(() => {
-                    const rawImg = tf.browser.fromPixels(videoElement);
-                    const batchedImg = rawImg.resizeBilinear([224, 224]).expandDims(0);
-                    return net.predict(batchedImg);
-                });
-            }
-
-            function addExample(label) {
-                if (!net || !classifier) {
-                    logDebug("AI engine not ready yet.");
-                    return;
-                }
-                try {
-                    const activation = captureFrame();
-                    if (activation) {
-                        classifier.addExample(activation, label);
-                        counts[label] = (counts[label] || 0) + 1;
-                        const counterSpan = document.getElementById(`count-${label}`);
-                        if (counterSpan) counterSpan.innerText = counts[label];
-                        logDebug(`Trained "${label}" (${counts[label]})`);
-                    }
-                } catch (err) {
-                    logDebug("Training failed: " + err.message);
-                }
-            }
-
-            document.getElementById('btn-me').addEventListener('click', () => addExample('me'));
-            document.getElementById('btn-background').addEventListener('click', () => addExample('background'));
-
-            function createCustomTrainingButton(label) {
-                if (counts[label] !== undefined) return; 
-                counts[label] = 0;
-
-                const btn = document.createElement('button');
-                btn.className = 'train-btn';
-                btn.style.backgroundColor = buttonColors[colorIndex % buttonColors.length];
-                colorIndex++;
-
-                btn.innerHTML = `<span>Train "${label}"</span> <span id="count-${label}">0</span>`;
-                btn.addEventListener('click', () => addExample(label));
-                
-                trainingButtonsContainer.appendChild(btn);
-                logDebug(`Added button: ${label}`);
-            }
-
-            btnAddClass.addEventListener('click', () => {
-                const name = classNameInput.value.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
-                if (name) {
-                    createCustomTrainingButton(name);
-                    classNameInput.value = "";
-                }
-            });
-
-            async function sendToHomeAssistant(label) {
-                if (label === lastSentState) return;
-                try {
-                    const response = await fetch(WEBHOOK_URL, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ option: label })
-                    });
-                    if (response.ok) {
-                        lastSentState = label;
-                        logDebug(`HA Notification $\rightarrow$ ${label}`);
-                    } else {
-                        logDebug(`HA code response: ${response.status}`);
-                    }
-                } catch (error) {
-                    // Fail silently to prevent console log cluttering
-                }
-            }
-
-            btnStart.addEventListener('click', async () => {
-                btnStart.style.display = 'none';
-                
-                try {
-                    logDebug("Downloading AI layers...");
-                    statusElement.innerText = "Loading AI Core...";
-                    
-                    if (typeof tf === 'undefined') {
-                        logDebug("Critical Failure: TensorFlow script failed to load.");
-                        return;
-                    }
-                    
-                    net = await tf.loadLayersModel('https://storage.googleapis.com/tfjs-models/tfjs/mobilenet_v1_0.25_224/model.json');
-                    
-                    logDebug("AI Core loaded. Launching lens...");
-                    await setupWebcam();
-                    
-                    statusElement.innerText = "AI Online! Train patterns.";
-                    logDebug("System running cleanly.");
-
-                    setInterval(async () => {
-                        if (classifier && classifier.getNumClasses() > 0) {
-                            try {
-                                const activation = captureFrame();
-                                if (activation) {
-                                    const result = await classifier.predictClass(activation);
-                                    const label = result.label;
-                                    
-                                    statusElement.innerText = `Detected: ${label.toUpperCase()}`;
-                                    statusElement.className = (label === "me") ? "detected" : "clear";
-
-                                    sendToHomeAssistant(label);
-                                }
-                            } catch (loopErr) {
-                                console.error(loopErr);
-                            }
-                        }
-                    }, 400);
-                } catch (err) {
-                    logDebug("Runtime crash: " + err.message);
-                }
-            });
-        });
-    </script>
-</body>
-</html>
+                    logDebug("Error
