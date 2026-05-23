@@ -32,15 +32,17 @@
             overflow: hidden;
             box-shadow: 0 8px 24px rgba(0,0,0,0.5);
             background-color: #000;
+            margin-bottom: 15px;
         }
         video {
             width: 100%;
             display: block;
             transform: scaleX(-1);
             object-fit: cover;
+            background: #000;
         }
         #status {
-            margin: 15px 0;
+            margin: 10px 0;
             font-size: 16px;
             font-weight: bold;
             padding: 10px 20px;
@@ -110,83 +112,5 @@
             touch-action: manipulation;
             display: flex;
             justify-content: space-between;
-            -webkit-tap-highlight-color: transparent;
         }
-        .train-btn:active {
-            opacity: 0.6;
-        }
-        .detected { background-color: #2e7d32 !important; }
-        .clear { background-color: #c62828 !important; }
-    </style>
-</head>
-<body>
-
-    <h1>Wall Tape AI Switch</h1>
-    
-    <div id="video-container">
-        <video id="webcam" autoplay playsinline muted></video>
-    </div>
-
-    <div class="setup-container">
-        <input type="text" id="class-name-input" placeholder="Type new item name...">
-        <button id="btn-add-class">Add Thing</button>
-    </div>
-
-    <div id="training-buttons" class="button-container">
-        <button class="train-btn" style="background-color: #1976d2;" id="btn-me">
-            <span>Train "me"</span> <span id="count-me">0</span>
-        </button>
-        <button class="train-btn" style="background-color: #616161;" id="btn-background">
-            <span>Train "background"</span> <span id="count-background">0</span>
-        </button>
-    </div>
-
-    <div id="status">Initializing system...</div>
-    <div id="debug-console">Console ready...</div>
-
-    <script>
-        const videoElement = document.getElementById('webcam');
-        const statusElement = document.getElementById('status');
-        const debugConsole = document.getElementById('debug-console');
-        const trainingButtonsContainer = document.getElementById('training-buttons');
-        const classNameInput = document.getElementById('class-name-input');
-        const btnAddClass = document.getElementById('btn-add-class');
-        
-        let net;
-        const classifier = knnClassifier.create();
-        let lastSentState = "";
-        let counts = { me: 0, background: 0 };
-
-        const buttonColors = ["#e91e63", "#9c27b0", "#009688", "#4caf50", "#ff5722"];
-        let colorIndex = 0;
-
-        const HA_URL = "http://192.168.1.206:8123/api/services/input_select/select_option";
-
-        function logDebug(msg) {
-            console.log(msg);
-            debugConsole.innerText = msg + "\n" + debugConsole.innerText;
-        }
-
-        async function setupWebcam() {
-            logDebug("Requesting HD camera access...");
-            // Requesting standard clean HD layout ratios 
-            const constraints = { 
-                video: { 
-                    facingMode: 'user',
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                } 
-            };
-            
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                videoElement.srcObject = stream;
-                return new Promise((resolve) => {
-                    videoElement.onloadedmetadata = () => {
-                        videoElement.play();
-                        logDebug("HD Camera streaming perfectly.");
-                        resolve();
-                    };
-                });
-            } catch (err) {
-                logDebug("Camera Error:
+        #btn
